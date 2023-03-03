@@ -2,20 +2,9 @@
 // Licensed under the MIT License. See License.txt in the project root for license information.
 
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
 using System.Threading.Tasks;
-using Castle.Core.Logging;
-using FluentAssertions.Common;
-using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Azure.WebJobs.Host.Scale;
-using Microsoft.Azure.WebJobs.Hosting;
-using Microsoft.Azure.WebJobs.Script.Config;
-using Microsoft.Azure.WebJobs.Script.DependencyInjection;
-using Microsoft.Azure.WebJobs.Script.Scale;
-using Microsoft.Azure.WebJobs.Script.Workers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -26,7 +15,7 @@ using Xunit;
 
 namespace Microsoft.Azure.WebJobs.Script.Tests.Scale
 {
-    public class FunctionsScaleMonitorServiceTests
+    public class ScaleMonitorServiceTests
     {
         [Theory]
         [InlineData(true, true)]
