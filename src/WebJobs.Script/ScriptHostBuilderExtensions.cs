@@ -12,6 +12,7 @@ using Microsoft.ApplicationInsights.Extensibility.Implementation;
 using Microsoft.ApplicationInsights.WindowsServer.TelemetryChannel;
 using Microsoft.Azure.WebJobs.Host;
 using Microsoft.Azure.WebJobs.Host.Executors;
+using Microsoft.Azure.WebJobs.Host.Scale;
 using Microsoft.Azure.WebJobs.Hosting;
 using Microsoft.Azure.WebJobs.Logging;
 using Microsoft.Azure.WebJobs.Logging.ApplicationInsights;
@@ -309,9 +310,15 @@ namespace Microsoft.Azure.WebJobs.Script
                 services.AddOptions<ScaleOptions>()
                     .Configure<IConfiguration>((o, c) =>
                     {
-                        c.GetSection(ConfigurationSectionNames.JobHost)
-                         .GetSection(ConfigurationSectionNames.Scale)
-                         .Bind(o);
+                        var scaleSection = c.GetSection(ConfigurationSectionNames.JobHost).GetSection(ConfigurationSectionNames.Scale);
+                        if (scaleSection.Exists())
+                        {
+                            scaleSection.Bind(o);
+                        }
+                        else
+                        {
+                            o.IsTargetScalingEnabled = SystemEnvironment.Instance.IsTargetBasedScalingEnabled();
+                        }
                     });
 
                 services.AddSingleton<IFileLoggingStatusManager, FileLoggingStatusManager>();
@@ -328,14 +335,14 @@ namespace Microsoft.Azure.WebJobs.Script
 
                 services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, FunctionInvocationDispatcherShutdownManager>());
 
-                if (SystemEnvironment.Instance.IsRuntimeScaleMonitoringEnabled())
-                {
-                    services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, FunctionsScaleMonitorService>());
-                }
-                services.TryAddSingleton<FunctionsScaleManager>();
-
                 services.AddSingleton<IHostOptionsProvider, HostOptionsProvider>();
             });
+
+            if (SystemEnvironment.Instance.IsRuntimeScaleMonitoringEnabled())
+            {
+                // This is needed only to add ScaleMonitorService, all other services for scale are added by the time of the call
+                builder.ConfigureWebJobsScale((context, builder) => { }, scaleOptions => { });
+            }
 
             RegisterFileProvisioningService(builder);
             return builder;
