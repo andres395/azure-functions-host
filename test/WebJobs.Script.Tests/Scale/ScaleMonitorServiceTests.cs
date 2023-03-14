@@ -49,13 +49,14 @@ namespace Microsoft.Azure.WebJobs.Script.Tests.Scale
                 Assert.Equal(scaleOptions.Value.IsTargetScalingEnabled, targetBaseScalingEnabled);
                 if (runtimeScaleMonitoringEnabled)
                 {
+                    Assert.Contains(testLoggerProvider.GetAllLogMessages(), x => x.FormattedMessage.StartsWith("Runtime scale monitoring is enabled."));
                     if (scaleOptions.Value.IsTargetScalingEnabled)
                     {
-                        Assert.Contains(testLoggerProvider.GetAllLogMessages(), x => x.FormattedMessage.StartsWith("Scale monitor service is started. Target base scaling is enabled."));
+                        Assert.Contains(testLoggerProvider.GetAllLogMessages(), x => x.FormattedMessage.Contains("\"IsTargetScalingEnabled\": true"));
                     }
                     else
                     {
-                        Assert.Contains(testLoggerProvider.GetAllLogMessages(), x => x.FormattedMessage.StartsWith("Scale monitor service is started. Target base scaling is disabled."));
+                        Assert.Contains(testLoggerProvider.GetAllLogMessages(), x => x.FormattedMessage.Contains("\"IsTargetScalingEnabled\": false"));
                     }
                 }
                 else

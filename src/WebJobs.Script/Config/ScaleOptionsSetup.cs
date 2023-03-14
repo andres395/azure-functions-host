@@ -29,6 +29,7 @@ namespace Microsoft.Azure.WebJobs.Script.Configuration
             }
             else
             {
+                options.IsRuntimeScalingEnabled = _environment.IsRuntimeScaleMonitoringEnabled();
                 options.IsTargetScalingEnabled = _environment.IsTargetBasedScalingEnabled();
             }
         }
