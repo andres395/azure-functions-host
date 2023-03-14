@@ -307,6 +307,8 @@ namespace Microsoft.Azure.WebJobs.Script
                          .GetSection(ConfigurationSectionNames.Aggregator)
                          .Bind(o);
                     });
+                services.ConfigureOptions<ScaleOptionsSetup>();
+
                 services.AddOptions<ScaleOptions>()
                     .Configure<IConfiguration>((o, c) =>
                     {
@@ -337,12 +339,6 @@ namespace Microsoft.Azure.WebJobs.Script
 
                 services.AddSingleton<IHostOptionsProvider, HostOptionsProvider>();
             });
-
-            if (SystemEnvironment.Instance.IsRuntimeScaleMonitoringEnabled())
-            {
-                // This is needed only to add ScaleMonitorService, all other services for scale are added by the time of the call
-                builder.ConfigureWebJobsScale((context, builder) => { }, scaleOptions => { });
-            }
 
             RegisterFileProvisioningService(builder);
             return builder;

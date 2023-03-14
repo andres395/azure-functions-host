@@ -2,6 +2,7 @@
 // Licensed under the MIT License. See License.txt in the project root for license information.
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Threading;
@@ -17,6 +18,7 @@ using Microsoft.Azure.WebJobs.Script.Scale;
 using Microsoft.Azure.WebJobs.Script.WebHost.Controllers;
 using Microsoft.Azure.WebJobs.Script.WebHost.Management;
 using Microsoft.Azure.WebJobs.Script.WebHost.Models;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.WebJobs.Script.Tests;
@@ -37,6 +39,7 @@ namespace Microsoft.Azure.WebJobs.Script.Tests
         private readonly Mock<HostPerformanceManager> _mockHostPerformanceManager;
         private readonly HostHealthMonitorOptions _hostHealthMonitorOptions;
         private readonly ScriptApplicationHostOptions _applicationHostOptions;
+        private readonly LoggerFactory _loggerFactory;
 
         public HostControllerTests()
         {
@@ -46,8 +49,8 @@ namespace Microsoft.Azure.WebJobs.Script.Tests
             var optionsWrapper = new OptionsWrapper<ScriptApplicationHostOptions>(_applicationHostOptions);
 
             var loggerProvider = new TestLoggerProvider();
-            var loggerFactory = new LoggerFactory();
-            loggerFactory.AddProvider(loggerProvider);
+            _loggerFactory = new LoggerFactory();
+            _loggerFactory.AddProvider(loggerProvider);
             _mockEnvironment = new Mock<IEnvironment>(MockBehavior.Strict);
             _mockEnvironment.Setup(p => p.GetEnvironmentVariable(It.IsAny<string>())).Returns<string>(null);
             _mockScriptHostManager = new Mock<IScriptHostManager>(MockBehavior.Strict);
@@ -59,7 +62,7 @@ namespace Microsoft.Azure.WebJobs.Script.Tests
             _hostHealthMonitorOptions = new HostHealthMonitorOptions();
             var wrappedHealthMonitorOptions = new OptionsWrapper<HostHealthMonitorOptions>(_hostHealthMonitorOptions);
             _mockHostPerformanceManager = new Mock<HostPerformanceManager>(_mockEnvironment.Object, wrappedHealthMonitorOptions, mockServiceProvider.Object);
-            _hostController = new HostController(optionsWrapper, loggerFactory, _mockEnvironment.Object, _mockScriptHostManager.Object, _functionsSyncManager.Object, _mockHostPerformanceManager.Object);
+            _hostController = new HostController(optionsWrapper, _loggerFactory, _mockEnvironment.Object, _mockScriptHostManager.Object, _functionsSyncManager.Object, _mockHostPerformanceManager.Object);
 
             _appOfflineFilePath = Path.Combine(_scriptPath, ScriptConstants.AppOfflineFileName);
             if (File.Exists(_appOfflineFilePath))
@@ -148,13 +151,12 @@ namespace Microsoft.Azure.WebJobs.Script.Tests
             {
                 WorkerCount = 5
             };
-            var scaleManagerMock = new Mock<IScaleManager>(MockBehavior.Strict);
-            scaleManagerMock.Setup(x => x.GetScaleStatusAsync(It.IsAny<ScaleStatusContext>())).Returns(Task.FromResult(new ScaleStatus() { Vote = ScaleVote.ScaleIn }));
+            var scaleManager = CreateScaleManager();
             var scriptHostManagerMock = new Mock<IScriptHostManager>(MockBehavior.Strict);
             var serviceProviderMock = scriptHostManagerMock.As<IServiceProvider>();
-            serviceProviderMock.Setup(p => p.GetService(typeof(IScaleManager))).Returns(scaleManagerMock.Object);
+            serviceProviderMock.Setup(p => p.GetService(typeof(ScaleManager))).Returns(scaleManager);
             var result = (ObjectResult)(await _hostController.GetScaleStatus(context, scriptHostManagerMock.Object));
-            Assert.Equal(((ScaleStatus)result.Value).Vote, ScaleVote.ScaleIn);
+            Assert.Equal(((AggregateScaleStatus)result.Value).Vote, ScaleVote.ScaleIn);
         }
 
         [Fact]
@@ -168,7 +170,7 @@ namespace Microsoft.Azure.WebJobs.Script.Tests
             };
             var scriptHostManagerMock = new Mock<IScriptHostManager>(MockBehavior.Strict);
             var serviceProviderMock = scriptHostManagerMock.As<IServiceProvider>();
-            serviceProviderMock.Setup(p => p.GetService(typeof(IScaleManager))).Returns(null);
+            serviceProviderMock.Setup(p => p.GetService(typeof(ScaleManager))).Returns(null);
             var result = (StatusCodeResult)(await _hostController.GetScaleStatus(context, scriptHostManagerMock.Object));
 
             Assert.Equal(StatusCodes.Status503ServiceUnavailable, result.StatusCode);
@@ -181,10 +183,10 @@ namespace Microsoft.Azure.WebJobs.Script.Tests
             {
                 WorkerCount = 5
             };
-            var scaleManagerMock = new Mock<IScaleManager>(MockBehavior.Strict);
+            var scaleManager = CreateScaleManager();
+            Mock<IServiceProvider> serviceProviderMock = new Mock<IServiceProvider>();
+            serviceProviderMock.Setup(x => x.GetService(typeof(ScaleManager))).Returns(scaleManager);
             var scriptHostManagerMock = new Mock<IScriptHostManager>(MockBehavior.Strict);
-            var serviceProviderMock = scriptHostManagerMock.As<IServiceProvider>();
-            serviceProviderMock.Setup(p => p.GetService(typeof(IScaleManager))).Returns(scaleManagerMock.Object);
             var result = (BadRequestObjectResult)(await _hostController.GetScaleStatus(context, scriptHostManagerMock.Object));
             Assert.Equal(HttpStatusCode.BadRequest, (HttpStatusCode)result.StatusCode);
             Assert.Equal("Runtime scale monitoring is not enabled.", result.Value);
@@ -348,6 +350,50 @@ namespace Microsoft.Azure.WebJobs.Script.Tests
             Assert.Equal(StatusCodes.Status200OK, result.StatusCode);
             Assert.Equal(expectedBody.State, (result.Value as ResumeStatus).State);
             scriptHostManagerMock.Verify(p => p.RestartHostAsync(It.IsAny<CancellationToken>()), Times.Never());
+        }
+
+        private ScaleManager CreateScaleManager()
+        {
+            Mock<IScaleMonitorManager> scaleMonitorManager = new Mock<IScaleMonitorManager>();
+            Mock<IScaleMonitor> scaleMonitorMock = new Mock<IScaleMonitor>();
+            scaleMonitorMock.Setup(x => x.GetScaleStatus(It.IsAny<ScaleStatusContext>())).Returns(new ScaleStatus() { Vote = ScaleVote.ScaleIn });
+            scaleMonitorMock.Setup(x => x.Descriptor).Returns(new ScaleMonitorDescriptor("test", "test"));
+            scaleMonitorManager.Setup(x => x.GetMonitors()).Returns(new List<IScaleMonitor>() { scaleMonitorMock.Object });
+            Mock<ITargetScalerManager> targetScalerManager = new Mock<ITargetScalerManager>();
+            targetScalerManager.Setup(x => x.GetTargetScalers()).Returns(new List<ITargetScaler>());
+            Mock<IScaleMetricsRepository> mockScaleMetricsRepository = new Mock<IScaleMetricsRepository>();
+            mockScaleMetricsRepository.Setup(x => x.ReadMetricsAsync(It.IsAny<IEnumerable<IScaleMonitor>>())).Returns(() =>
+            {
+                var dic = new Dictionary<IScaleMonitor, IList<ScaleMetrics>>()
+                {
+                    { scaleMonitorMock.Object, new List<ScaleMetrics>() { new ScaleMetrics() } }
+                };
+
+                return Task.FromResult((IDictionary<IScaleMonitor, IList<ScaleMetrics>>)dic);
+            });
+            Mock<IConcurrencyStatusRepository> concurrencyStatusRepository = new Mock<IConcurrencyStatusRepository>();
+            concurrencyStatusRepository.Setup(x => x.ReadAsync(It.IsAny<CancellationToken>())).Returns(() =>
+            {
+                return null;
+            });
+
+            IOptions<ScaleOptions> scaleOptions = Options.Create<ScaleOptions>(new ScaleOptions()
+            {
+                IsRuntimeScalingEnabled = true,
+                ScaleMetricsSampleInterval = TimeSpan.FromMilliseconds(1000)
+            });
+
+            ConfigurationBuilder configurationBuilder = new ConfigurationBuilder();
+            TestLoggerProvider testLoggerProvider = new TestLoggerProvider();
+
+            return new ScaleManager(
+                scaleMonitorManager.Object,
+                targetScalerManager.Object,
+                mockScaleMetricsRepository.Object,
+                concurrencyStatusRepository.Object,
+                scaleOptions,
+                _loggerFactory,
+                configurationBuilder.Build());
         }
     }
 }
