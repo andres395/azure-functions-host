@@ -12,8 +12,9 @@ namespace Microsoft.Azure.WebJobs.Script.Configuration
         private readonly IConfiguration _configuration;
         private readonly IEnvironment _environment;
 
-        public ScaleOptionsSetup(IEnvironment environment)
+        public ScaleOptionsSetup(IConfiguration configuration, IEnvironment environment)
         {
+            _configuration = configuration;
             _environment = environment;
         }
 
