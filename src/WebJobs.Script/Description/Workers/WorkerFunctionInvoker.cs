@@ -194,20 +194,24 @@ namespace Microsoft.Azure.WebJobs.Script.Description
             return input;
         }
 
-        private CancellationToken HandleCancellationTokenParameter(object input, HttpRequest httpRequest = null)
+        internal CancellationToken HandleCancellationTokenParameter(object cancellationTokenParameter, HttpRequest httpRequest = null)
         {
-            if (input is null) // TODO: if input is null but RequestAborted is not, we should still use that CT
+            CancellationToken cancellationToken = CancellationToken.None;
+
+            if (cancellationTokenParameter is not null)
             {
-                return CancellationToken.None;
+                cancellationToken = (CancellationToken)cancellationTokenParameter;
             }
 
-            CancellationToken cancellationToken = (CancellationToken)input;
-
-            if (httpRequest is not null)
+            if (httpRequest?.HttpContext is not null && cancellationToken != CancellationToken.None)
             {
-                // TODO: dispose cancellationSource
+                // TODO: need to dispose cancellation source
                 var cancellationSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, httpRequest.HttpContext.RequestAborted);
-                return cancellationSource.Token;
+                cancellationToken = cancellationSource.Token;
+            }
+            else if (httpRequest?.HttpContext is not null)
+            {
+                cancellationToken = httpRequest.HttpContext.RequestAborted;
             }
 
             return cancellationToken;

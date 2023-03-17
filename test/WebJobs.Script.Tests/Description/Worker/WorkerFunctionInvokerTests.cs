@@ -3,7 +3,9 @@
 
 using System;
 using System.Collections.ObjectModel;
+using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Azure.WebJobs.Script.Binding;
 using Microsoft.Azure.WebJobs.Script.Description;
 using Microsoft.Azure.WebJobs.Script.Workers;
@@ -21,9 +23,11 @@ namespace Microsoft.Azure.WebJobs.Script.Tests
         private readonly TestWorkerFunctionInvoker _testFunctionInvoker;
         private readonly Mock<IApplicationLifetime> _applicationLifetime;
         private readonly Mock<IFunctionInvocationDispatcher> _mockFunctionInvocationDispatcher;
+        private Mock<HttpRequest> _mockHttpRequest;
 
         public WorkerFunctionInvokerTests()
         {
+            _mockHttpRequest = new Mock<HttpRequest>();
             _applicationLifetime = new Mock<IApplicationLifetime>();
             _mockFunctionInvocationDispatcher = new Mock<IFunctionInvocationDispatcher>();
             _mockFunctionInvocationDispatcher.Setup(a => a.ErrorEventsThreshold).Returns(0);
@@ -92,6 +96,74 @@ namespace Microsoft.Azure.WebJobs.Script.Tests
             {
             }
             _applicationLifetime.Verify(a => a.StopApplication(), Times.Never);
+        }
+
+        [Fact]
+        public void HandleCancellationTokenParameter_NullParameters_ReturnsCancellationTokenNone()
+        {
+            var result = _testFunctionInvoker.HandleCancellationTokenParameter(null, null);
+            Assert.Equal(CancellationToken.None, result);
+        }
+
+        [Fact]
+        public void HandleCancellationTokenParameter_CancellationTokenParameter_ReturnsCancellationToken()
+        {
+            CancellationTokenSource cts = new();
+            var cancellationTokenParameter = cts.Token;
+
+            var result = _testFunctionInvoker.HandleCancellationTokenParameter(cancellationTokenParameter, null);
+
+            Assert.Equal(cancellationTokenParameter, result);
+            cts.Cancel();
+            Assert.True(result.IsCancellationRequested);
+        }
+
+        [Fact]
+        public void HandleCancellationTokenParameter_HttpCancellationToken_ReturnsCancellationToken()
+        {
+            CancellationTokenSource cts = new();
+            var requestAborted = cts.Token;
+
+            HttpContext httpContext = new DefaultHttpContext() { RequestAborted = requestAborted };
+            _mockHttpRequest.Setup(m => m.HttpContext).Returns(httpContext);
+
+            var result = _testFunctionInvoker.HandleCancellationTokenParameter(null, _mockHttpRequest.Object);
+
+            Assert.Equal(requestAborted, result);
+            cts.Cancel();
+            Assert.True(result.IsCancellationRequested);
+        }
+
+        [Theory]
+        [InlineData(true)]
+        [InlineData(false)]
+        public void HandleCancellationTokenParameter_TwoCancellationTokens_ReturnsCancellationToken(bool cancelHostSource)
+        {
+            CancellationTokenSource hostCts = new();
+            var cancellationTokenParameter = hostCts.Token;
+
+            CancellationTokenSource httpCts = new();
+            var requestAborted = httpCts.Token;
+
+            HttpContext httpContext = new DefaultHttpContext() { RequestAborted = requestAborted };
+            _mockHttpRequest.Setup(m => m.HttpContext).Returns(httpContext);
+
+            var result = _testFunctionInvoker.HandleCancellationTokenParameter(cancellationTokenParameter, _mockHttpRequest.Object);
+
+            Assert.NotEqual(cancellationTokenParameter, result);
+            Assert.NotEqual(requestAborted, result);
+            Assert.NotEqual(CancellationToken.None, result);
+
+            if (cancelHostSource)
+            {
+                hostCts.Cancel();
+            }
+            else
+            {
+                httpCts.Cancel();
+            }
+
+            Assert.True(result.IsCancellationRequested);
         }
     }
 }
