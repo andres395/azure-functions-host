@@ -11,6 +11,7 @@ using System.Reactive.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Azure.WebJobs.Script.Binding;
 using Microsoft.Azure.WebJobs.Script.Workers;
 using Microsoft.CodeAnalysis;
@@ -75,6 +76,12 @@ namespace Microsoft.Azure.WebJobs.Script.Description
                 inputs = inputs.Concat(nonTriggerInputs);
             }
 
+            HttpRequest httpRequest = null;
+            if (triggerValue is HttpRequest)
+            {
+                httpRequest = (HttpRequest)triggerValue;
+            }
+
             var invocationContext = new ScriptInvocationContext
             {
                 FunctionMetadata = Metadata,
@@ -86,7 +93,7 @@ namespace Microsoft.Azure.WebJobs.Script.Description
                 Traceparent = Activity.Current?.Id,
                 Tracestate = Activity.Current?.TraceStateString,
                 Attributes = Activity.Current?.Tags,
-                CancellationToken = HandleCancellationTokenParameter(parameters[cancellationTokenParameterIndex]),
+                CancellationToken = HandleCancellationTokenParameter(parameters[cancellationTokenParameterIndex], httpRequest),
                 Logger = context.Logger
             };
 
@@ -187,14 +194,23 @@ namespace Microsoft.Azure.WebJobs.Script.Description
             return input;
         }
 
-        private CancellationToken HandleCancellationTokenParameter(object input)
+        private CancellationToken HandleCancellationTokenParameter(object input, HttpRequest httpRequest = null)
         {
-            if (input == null)
+            if (input is null) // TODO: if input is null but RequestAborted is not, we should still use that CT
             {
                 return CancellationToken.None;
             }
 
-            return (CancellationToken)input;
+            CancellationToken cancellationToken = (CancellationToken)input;
+
+            if (httpRequest is not null)
+            {
+                // TODO: dispose cancellationSource
+                var cancellationSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, httpRequest.HttpContext.RequestAborted);
+                return cancellationSource.Token;
+            }
+
+            return cancellationToken;
         }
 
         private void HandleReturnParameter(ScriptInvocationResult result)
